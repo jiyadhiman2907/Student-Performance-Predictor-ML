@@ -211,6 +211,57 @@ if st.button("Predict exam score", type="primary"):
     st.pyplot(fig)
     plt.close(fig)
 
+    # Prediction insights: compare the estimate with observed dataset scores
+    st.subheader("Prediction Insights")
+
+    score_difference = score - average_score
+    dataset_percentile = (df["Exam_Score"] <= score).mean() * 100
+
+    insight1, insight2, insight3 = st.columns(3)
+
+    with insight1:
+        st.metric(
+            "Difference from Dataset Average",
+            f"{score_difference:+.1f} points"
+        )
+
+    with insight2:
+        st.metric(
+            "Position in Dataset Score Distribution",
+            f"{dataset_percentile:.0f}th percentile"
+        )
+
+    with insight3:
+        st.metric(
+            "Dataset Median",
+            f"{median_score:.1f} / 100"
+        )
+
+    if score_difference > 0.5:
+        st.info(
+            "The predicted score is above the dataset average. "
+            "This is a comparison with the dataset, not a guarantee "
+            "of actual exam performance."
+        )
+    elif score_difference < -0.5:
+        st.info(
+            "The predicted score is below the dataset average. "
+            "Consider reviewing study habits and seeking academic support "
+            "where useful. This estimate is not an official grade."
+        )
+    else:
+        st.info(
+            "The predicted score is close to the dataset average. "
+            "Actual results may differ from this estimate."
+        )
+
+    st.caption(
+        "Percentile is calculated by comparing the predicted score with "
+        "the observed Exam_Score values in the loaded dataset. It describes "
+        "relative position in this dataset only; it is not a rank among "
+        "all students or a prediction of future class standing."
+    )
+
 # Student performance dashboard
 st.divider()
 st.header("Student Performance Dashboard")
