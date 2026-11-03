@@ -15,14 +15,12 @@ st.set_page_config(
     layout="wide"
 )
 
-# Project paths
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_PATH = BASE_DIR / "models" / "best_model.pkl"
 DATA_PATH = BASE_DIR / "data" / "student_data_cleaned.csv"
 DB_PATH = BASE_DIR / "predictions.db"
 
 
-# Initialize SQLite database
 def initialize_database():
     with sqlite3.connect(DB_PATH) as connection:
         connection.execute("""
@@ -35,7 +33,6 @@ def initialize_database():
         """)
 
 
-# Save a prediction to the database
 def log_prediction(student_inputs, predicted_score):
     timestamp = datetime.now().astimezone().isoformat(
         timespec="seconds"
@@ -45,9 +42,7 @@ def log_prediction(student_inputs, predicted_score):
         connection.execute(
             """
             INSERT INTO predictions (
-                timestamp,
-                student_inputs,
-                predicted_score
+                timestamp, student_inputs, predicted_score
             )
             VALUES (?, ?, ?)
             """,
@@ -59,22 +54,40 @@ def log_prediction(student_inputs, predicted_score):
         )
 
 
+def predict_score(student_inputs):
+    row = pd.DataFrame([student_inputs])
+
+    encoded = pd.get_dummies(row).reindex(
+        columns=columns,
+        fill_value=0
+    )
+
+    score = float(model.predict(encoded)[0])
+    return max(0.0, min(100.0, score))
+
+
 initialize_database()
 
-# Load model and dataset
 saved = joblib.load(MODEL_PATH)
 model = saved["model"]
 columns = saved["columns"]
 df = pd.read_csv(DATA_PATH)
 
-# Application heading
+# Store the original prediction between Streamlit reruns
+if "baseline_inputs" not in st.session_state:
+    st.session_state.baseline_inputs = None
+
+if "baseline_score" not in st.session_state:
+    st.session_state.baseline_score = None
+
+
 st.title("Student Performance Predictor")
+
 st.write(
     "Enter a student's details to estimate their exam score. "
     "This tool supports self-assessment and is not an official grade."
 )
 
-# Student inputs
 levels = ["Low", "Medium", "High"]
 
 left, right = st.columns(2)
@@ -123,41 +136,48 @@ with right:
     )
     internet = st.selectbox("Internet access", ["Yes", "No"])
 
-# Generate prediction
+
+student_inputs = {
+    "Hours_Studied": hours,
+    "Attendance": attendance,
+    "Parental_Involvement": involvement,
+    "Access_to_Resources": resources,
+    "Extracurricular_Activities": extra,
+    "Sleep_Hours": sleep,
+    "Previous_Scores": previous,
+    "Motivation_Level": motivation,
+    "Internet_Access": internet,
+    "Tutoring_Sessions": tutoring,
+    "Family_Income": income,
+    "Teacher_Quality": teacher,
+    "School_Type": school,
+    "Peer_Influence": peer,
+    "Physical_Activity": activity,
+    "Learning_Disabilities": disability,
+    "Parental_Education_Level": parent_edu,
+    "Distance_from_Home": distance,
+    "Gender": gender
+}
+
+
+# Original prediction
 if st.button("Predict exam score", type="primary"):
-    student_inputs = {
-        "Hours_Studied": hours,
-        "Attendance": attendance,
-        "Parental_Involvement": involvement,
-        "Access_to_Resources": resources,
-        "Extracurricular_Activities": extra,
-        "Sleep_Hours": sleep,
-        "Previous_Scores": previous,
-        "Motivation_Level": motivation,
-        "Internet_Access": internet,
-        "Tutoring_Sessions": tutoring,
-        "Family_Income": income,
-        "Teacher_Quality": teacher,
-        "School_Type": school,
-        "Peer_Influence": peer,
-        "Physical_Activity": activity,
-        "Learning_Disabilities": disability,
-        "Parental_Education_Level": parent_edu,
-        "Distance_from_Home": distance,
-        "Gender": gender
-    }
+    score = predict_score(student_inputs)
 
-    row = pd.DataFrame([student_inputs])
-
-    encoded = pd.get_dummies(row).reindex(
-        columns=columns,
-        fill_value=0
-    )
-
-    score = float(model.predict(encoded)[0])
-    score = max(0.0, min(100.0, score))
+    st.session_state.baseline_inputs = student_inputs.copy()
+    st.session_state.baseline_score = score
 
     log_prediction(student_inputs, score)
+
+
+# Display original prediction and insights
+if st.session_state.baseline_score is not None:
+
+    score = st.session_state.baseline_score
+    original_inputs = st.session_state.baseline_inputs
+
+    st.divider()
+    st.subheader("Your Prediction")
 
     st.subheader(f"Predicted exam score: {score:.1f} / 100")
     st.success("Prediction saved to the database.")
@@ -211,11 +231,13 @@ if st.button("Predict exam score", type="primary"):
     st.pyplot(fig)
     plt.close(fig)
 
-    # Prediction insights: compare the estimate with observed dataset scores
+    # Prediction insights
     st.subheader("Prediction Insights")
 
     score_difference = score - average_score
-    dataset_percentile = (df["Exam_Score"] <= score).mean() * 100
+    dataset_percentile = (
+        df["Exam_Score"] <= score
+    ).mean() * 100
 
     insight1, insight2, insight3 = st.columns(3)
 
@@ -246,8 +268,8 @@ if st.button("Predict exam score", type="primary"):
     elif score_difference < -0.5:
         st.info(
             "The predicted score is below the dataset average. "
-            "Consider reviewing study habits and seeking academic support "
-            "where useful. This estimate is not an official grade."
+            "Consider reviewing study habits and seeking academic "
+            "support where useful. This estimate is not an official grade."
         )
     else:
         st.info(
@@ -256,11 +278,127 @@ if st.button("Predict exam score", type="primary"):
         )
 
     st.caption(
-        "Percentile is calculated by comparing the predicted score with "
-        "the observed Exam_Score values in the loaded dataset. It describes "
-        "relative position in this dataset only; it is not a rank among "
-        "all students or a prediction of future class standing."
+        "Percentile is calculated by comparing the predicted score "
+        "with observed Exam_Score values in the loaded dataset. "
+        "It describes relative position in this dataset only."
     )
+
+    # NEW FEATURE: WHAT-IF PERFORMANCE SIMULATOR
+    st.divider()
+    st.header("What-If Performance Simulator")
+
+    st.write(
+        "Explore how changing study hours and attendance affects "
+        "the score estimated by the trained model."
+    )
+
+    st.caption(
+        "The simulator changes only the selected inputs. "
+        "All other student details remain the same."
+    )
+
+    sim_col1, sim_col2 = st.columns(2)
+
+    with sim_col1:
+        simulated_hours = st.slider(
+            "Try different study hours per week",
+            min_value=1,
+            max_value=44,
+            value=int(original_inputs["Hours_Studied"]),
+            key="simulated_hours"
+        )
+
+    with sim_col2:
+        simulated_attendance = st.slider(
+            "Try different attendance (%)",
+            min_value=60,
+            max_value=100,
+            value=int(original_inputs["Attendance"]),
+            key="simulated_attendance"
+        )
+
+    simulated_inputs = original_inputs.copy()
+
+    simulated_inputs["Hours_Studied"] = simulated_hours
+    simulated_inputs["Attendance"] = simulated_attendance
+
+    simulated_score = predict_score(simulated_inputs)
+    difference = simulated_score - score
+
+    st.subheader("Simulation Results")
+
+    result1, result2, result3 = st.columns(3)
+
+    with result1:
+        st.metric(
+            "Original Predicted Score",
+            f"{score:.1f} / 100"
+        )
+
+    with result2:
+        st.metric(
+            "Simulated Predicted Score",
+            f"{simulated_score:.1f} / 100"
+        )
+
+    with result3:
+        st.metric(
+            "Difference",
+            f"{difference:+.1f} points"
+        )
+
+    simulation_comparison = pd.DataFrame({
+        "Prediction": [
+            "Original",
+            "What-if simulation"
+        ],
+        "Score": [score, simulated_score]
+    })
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+
+    bars = ax.bar(
+        simulation_comparison["Prediction"],
+        simulation_comparison["Score"],
+        edgecolor="black"
+    )
+
+    ax.set_ylabel("Predicted Exam Score")
+    ax.set_ylim(0, 100)
+    ax.set_title("Original vs Simulated Prediction")
+
+    for bar in bars:
+        height = bar.get_height()
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            height + 1,
+            f"{height:.1f}",
+            ha="center"
+        )
+
+    fig.tight_layout()
+    st.pyplot(fig)
+    plt.close(fig)
+
+    st.write("**Changes made in this simulation:**")
+
+    st.write(
+        f"- Study hours: {original_inputs['Hours_Studied']} → "
+        f"{simulated_hours} hours per week"
+    )
+
+    st.write(
+        f"- Attendance: {original_inputs['Attendance']}% → "
+        f"{simulated_attendance}%"
+    )
+
+    st.info(
+        "This is a model-based what-if estimate, not proof that "
+        "changing these factors will cause the same improvement "
+        "in real exam results. The simulation is not saved as a "
+        "separate prediction in the history."
+    )
+
 
 # Student performance dashboard
 st.divider()
@@ -309,6 +447,7 @@ ax.axvline(0, linewidth=1)
 fig.tight_layout()
 st.pyplot(fig)
 plt.close(fig)
+
 
 # Model evaluation
 st.divider()
@@ -372,6 +511,7 @@ with st.expander("Understand the evaluation metrics"):
     **Important:** These are recorded test-set results and do not guarantee
     accuracy for every new student.
     """)
+
 
 # Prediction history and summary
 st.divider()
@@ -440,7 +580,8 @@ else:
         use_container_width=True
     )
 
-# Download all prediction records
+
+# Download prediction records
 st.subheader("Export Prediction History")
 
 if all_predictions.empty:
@@ -454,6 +595,7 @@ else:
         file_name="student_prediction_history.csv",
         mime="text/csv"
     )
+
 
 # Disclaimer
 st.caption(
